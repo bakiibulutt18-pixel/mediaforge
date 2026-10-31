@@ -27,8 +27,6 @@ runs:
     - uses: actions/setup-python@v5
       with:
         python-version: "3.12"
-        cache: pip
-        cache-dependency-path: requirements.txt
     - if: inputs.render == 'true'
       shell: bash
       run: |
