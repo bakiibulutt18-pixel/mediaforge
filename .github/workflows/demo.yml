@@ -1,0 +1,63 @@
+name: Kalite örnekleri
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Üret ama yayınlama"
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: forge-demo
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FORGE_LIVE: ${{ vars.FORGE_LIVE }}
+      FORGE_DRY_RUN: ${{ inputs.dry_run == true && '1' || '' }}
+      PYTHONUNBUFFERED: "1"
+      TTS_PROVIDERS: ${{ vars.TTS_PROVIDERS }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      YT_FUN_CLIENT_ID: ${{ secrets.YT_FUN_CLIENT_ID }}
+      YT_FUN_CLIENT_SECRET: ${{ secrets.YT_FUN_CLIENT_SECRET }}
+      YT_FUN_REFRESH_TOKEN: ${{ secrets.YT_FUN_REFRESH_TOKEN }}
+      YT_DOC_CLIENT_ID: ${{ secrets.YT_DOC_CLIENT_ID }}
+      YT_DOC_CLIENT_SECRET: ${{ secrets.YT_DOC_CLIENT_SECRET }}
+      YT_DOC_REFRESH_TOKEN: ${{ secrets.YT_DOC_REFRESH_TOKEN }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      IG_USER_ID: ${{ secrets.IG_USER_ID }}
+      X_API_KEY: ${{ secrets.X_API_KEY }}
+      X_API_SECRET: ${{ secrets.X_API_SECRET }}
+      X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+      X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          render: "true"
+      - name: Çalıştır
+        run: python -m forge demo-voice
+      - name: Örnek videolar
+        run: python -m forge demo-video
+      - name: Paneli güncelle
+        if: always()
+        run: python -m forge dashboard
+      - name: Önizleme çıktısı (yayın kapalıyken)
+        if: ${{ always() && (vars.FORGE_LIVE != '1' || inputs.dry_run == true || true) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: onizleme-demo
+          path: |
+            out/demo/*.mp3
+            out/demo/ornek_*.mp4
+          retention-days: 3
+          if-no-files-found: ignore
+      - name: Durumu kaydet
+        if: always()
+        run: bash tools/commit_state.sh "demo"

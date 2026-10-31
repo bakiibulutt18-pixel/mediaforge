@@ -10,6 +10,7 @@ import statistics
 import time
 
 from .. import config, images, llm, quality, research, tts, video
+from .. import render as renderer
 from ..net import HttpError, request
 from ..publish import youtube
 from . import common
@@ -131,7 +132,8 @@ def build_script(ctx: Ctx, topic: str, cand: dict, claims: list[dict], feedback:
             f"Persona: {cfg['persona']}\nVideo konusu: {topic}\nBölüm {si + 1}/{len(outline['sections'])}: {sec['heading']} — {sec['goal']}\n"
             f"Hedef: ~{per_section} kelime Türkçe anlatım; her sahne 1-2 cümle (8-25 kelime). Önceki bölümün son cümlesi: {prev or '—'}\n"
             "Yalnızca aşağıdaki iddialardaki bilgi ve sayıları kullan; sayı uydurma. Sayıları, yılları ve ölçüleri RAKAMLA yaz "
-            "(ör. 1969, 24.000 konteyner); yazıyla yazma. Doğal, özgün, kalıp cümlesiz yaz; "
+            "(ör. 1969, 24.000 konteyner); yazıyla yazma. Konuşma dili gibi yaz, virgülleri doğru kullan; sahne başına en fazla 1-2 "
+            "kelimeyi *yıldız* içine alarak vurgula. Doğal, özgün, kalıp cümlesiz yaz; "
             f"{'bu bir belgesel: ciddi ve akıcı ton.' if cfg.get('research') == 'deep' else 'esprili ve enerjik ton, ama bilgi doğru kalsın.'}\n"
             "visual_type: stock (stok video/foto), ai (yapay zekâ illüstrasyon) veya chart (YALNIZCA iddialardaki sayılarla "
             "karşılaştırma grafiği; chart alanını doldur). visual_query/visual_prompt İNGİLİZCE.\n"
@@ -145,7 +147,7 @@ def build_script(ctx: Ctx, topic: str, cand: dict, claims: list[dict], feedback:
             scenes.append(sc)
         sections_meta.append({"heading": sec["heading"], "first_scene": start_idx})
         prev = data["scenes"][-1]["text"] if data["scenes"] else prev
-    text = " ".join(s["text"] for s in scenes)
+    text = tts.strip_markup(" ".join(s["text"] for s in scenes))
     return {"scenes": scenes, "sections": sections_meta, "script_text": text, "target_minutes": minutes}
 
 
@@ -166,35 +168,41 @@ def make_metadata(ctx: Ctx, topic: str, script: dict, sources: list[dict]) -> di
 def render(ctx: Ctx, script: dict) -> dict:
     cfg, wd = ctx.cfg, ctx.workdir
     used: set = set()
-    clips, licenses, srt, starts, t = [], [], [], [], 0.0
     fake = config.mock() or config.skip_render()
+    speeches = tts.speak_all(ctx.db, [sc["text"] for sc in script["scenes"]], wd, cfg, seed=ctx.item_id)
+    first_of_section = {s["first_scene"]: s["heading"] for s in script["sections"]}
+    scenes, licenses = [], []
     for i, sc in enumerate(script["scenes"]):
-        audio, d = tts.synthesize(sc["text"], wd / f"a{i}", voice=cfg["voice"], rate=cfg["rate"])
-        dur = d + 0.25
-        starts.append(t)
         if sc.get("visual_type") == "chart" and sc.get("chart", {}).get("bars") and not fake:
             vis = {"path": video.chart_png(sc["chart"], W, H, wd / f"v{i}.png"), "type": "image", "provider": "chart",
                    "license": "özgün grafik", "credit_url": "", "synthetic": False}
         else:
             vis = images.get_visual(sc, wd, f"v{i}", vertical=False, seed=ctx.item_id * 17 + i, used=used)
         licenses.append({k: vis.get(k) for k in ("provider", "license", "credit_url", "synthetic", "attribution", "errors")})
-        chunks = video.split_chunks(sc["text"], 14)
-        times = video.chunk_times(chunks, dur)
-        for c, (s, e) in zip(chunks, times):
-            srt.append((t + s, t + e, c))
-        if not fake:
-            caps = [(video.caption_png(c, W, H, wd / f"c{i}_{j}.png", "wide"), s, e) for j, (c, (s, e)) in enumerate(zip(chunks, times))]
-            clips.append(video.render_scene(vis, audio, caps, str(wd / f"s{i}.mp4"), W, H, dur, i))
-        t += dur
+        scenes.append({"speech": speeches[i], "visual": vis, "text": sc["text"], "title": first_of_section.get(i)})
     out = str(wd / "final.mp4")
     if fake:
         pathlib.Path(out).write_bytes(b"MOCKVIDEO")
+        starts, t = [], 0.0
+        for s in speeches:
+            starts.append(t)
+            t += s.duration + 0.65
     else:
-        video.concat_finish(clips, out, wd)
+        r = renderer.render_video(scenes, out, wd, W=W, H=H, kind="long", seed=ctx.item_id,
+                                log=lambda lvl, msg: ctx.db.log(lvl, msg))
+        starts, t = r["speech_starts"], r["duration"]
+        ctx.db.log("info", f"render modu: {r['mode']}, ses: {speeches[0].provider}")
+    srt = []
+    for i, sp in enumerate(speeches):
+        marks = sp.marks or [(0.0, sp.duration, tts.strip_markup(script["scenes"][i]["text"]))]
+        for ms, me, txt in marks:
+            chunks = video.split_chunks(tts.strip_markup(txt), 14)
+            for c, (s, e) in zip(chunks, video.chunk_times(chunks, me - ms)):
+                srt.append((starts[i] + ms + s, starts[i] + ms + e, c))
     srt_path = video.write_srt(srt, wd / "captions.srt")
     chap = []
     for sec in script["sections"]:
-        chap.append((starts[sec["first_scene"]] if sec["first_scene"] < len(starts) else 0, sec["heading"]))
+        chap.append((max(starts[sec["first_scene"]] - renderer.HEAD, 0) if sec["first_scene"] < len(starts) else 0, sec["heading"]))
     return {"path": out, "licenses": licenses, "duration": t, "srt": srt_path, "chapters": chap}
 
 

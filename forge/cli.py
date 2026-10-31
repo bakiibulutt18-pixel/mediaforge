@@ -16,6 +16,8 @@ USAGE = """Kullanım: python -m forge <komut> [kanal]
   strategy [kanal]     haftalık strateji güncellemesi
   dashboard            docs/index.html panelini üret
   health               gizli anahtarların ve bağlantıların durumunu kontrol et
+  demo-voice           ses örnekleri (Gemini ve Edge) → out/demo
+  demo-video           örnek dikey + yatay video → out/demo
   ig-refresh           Instagram token'ını yenile (yeni token'ı GitHub Secret'a elle yaz)
 """
 
@@ -42,6 +44,59 @@ def health() -> int:
             print(f"OK     {name} bağlantısı" + (f": {r}" if isinstance(r, dict) else ""))
         except Exception as e:
             print(f"HATA   {name}: {str(e)[:160]}")
+    return 0
+
+
+SAMPLE_TEXTS = [
+    "1969 yılında, Ay'a ayak basan ilk insanlar *sadece* iki kişiydi. Peki ya sonrasında ne oldu? Bunu çok az kişi bilir.",
+    "Üstelik, o günün bilgisayarı bugünkü bir hesap makinesinden bile *daha zayıftı*! İnanması zor, değil mi?",
+    "Ve işte asıl şaşırtıcı kısım: Her şey, sadece birkaç satırlık bir kodla başladı.",
+]
+
+
+def demo_voice() -> int:
+    """Aynı örnek metni her sağlayıcıyla seslendirir → out/demo/ses_<sağlayıcı>.mp3"""
+    import os
+    import pathlib
+
+    from . import tts, video
+    out = config.OUT_DIR / "demo"
+    out.mkdir(parents=True, exist_ok=True)
+    cfg = dict(config.CHANNELS["yt_fun_shorts"])
+    text = " ".join(SAMPLE_TEXTS)
+    for prov in ("gemini", "edge"):
+        os.environ["TTS_PROVIDERS"] = prov
+        try:
+            sp = tts.speak_all(None, [text], out, cfg, seed=7)[0]
+            dst = out / f"ses_{prov}.mp3"
+            try:
+                video.run([video.ffmpeg_exe(), "-y", "-hide_banner", "-loglevel", "error", "-i", sp.path, "-b:a", "128k", str(dst)])
+            except Exception:
+                dst = pathlib.Path(sp.path)
+            print(f"OK     {prov}: {dst.name} ({sp.duration:.1f} sn)")
+        except Exception as e:
+            print(f"HATA   {prov}: {str(e)[:300]}")
+    return 0
+
+
+def demo_video() -> int:
+    """Gerçek görsellerle kısa dikey + yatay örnek video → out/demo/ornek_dikey.mp4, ornek_yatay.mp4"""
+    from . import images, render, tts
+    out = config.OUT_DIR / "demo"
+    out.mkdir(parents=True, exist_ok=True)
+    queries = [("moon landing astronaut", "Astronaut on the moon, cinematic"), ("old computer circuit board", "Vintage computer, cinematic"),
+               ("code on screen", "Programmer typing code, cinematic")]
+    cfg = dict(config.CHANNELS["yt_fun_shorts"])
+    speeches = tts.speak_all(None, SAMPLE_TEXTS, out, cfg, seed=3)
+    for kind, (W, H), name in (("short", (1080, 1920), "ornek_dikey.mp4"), ("long", (1920, 1080), "ornek_yatay.mp4")):
+        used: set = set()
+        scenes = []
+        for i, (q, p) in enumerate(queries):
+            vis = images.get_visual({"visual_type": "stock", "visual_query": q, "visual_prompt": p}, out, f"dv_{kind}{i}",
+                                    vertical=(kind == "short"), seed=i, used=used)
+            scenes.append({"speech": speeches[i], "visual": vis, "text": SAMPLE_TEXTS[i], "title": "Ay'a yolculuk" if kind == "long" and i == 0 else None})
+        r = render.render_video(scenes, str(out / name), out, W=W, H=H, kind=kind, seed=5, log=lambda l, m: print(l, m))
+        print(f"OK     {name}: {r['duration']:.1f} sn, mod={r['mode']}, ses={speeches[0].provider}")
     return 0
 
 
@@ -76,6 +131,10 @@ def main(argv: list[str]) -> int:
         print(dashboard.build())
     elif cmd == "health":
         return health()
+    elif cmd == "demo-voice":
+        return demo_voice()
+    elif cmd == "demo-video":
+        return demo_video()
     elif cmd == "ig-refresh":
         from .publish import instagram
         r = instagram.refresh_token()

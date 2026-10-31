@@ -21,6 +21,7 @@ jobs:
       FORGE_LIVE: ${{ vars.FORGE_LIVE }}
       FORGE_DRY_RUN: ${{ inputs.dry_run == true && '1' || '' }}
       PYTHONUNBUFFERED: "1"
+      TTS_PROVIDERS: ${{ vars.TTS_PROVIDERS }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}

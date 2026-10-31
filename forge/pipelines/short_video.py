@@ -7,6 +7,7 @@ import pathlib
 import time
 
 from .. import config, images, llm, quality, research, tts, video
+from .. import render as renderer
 from ..publish import instagram, youtube
 from . import common
 from .common import Ctx
@@ -52,7 +53,9 @@ def write_script(ctx: Ctx, topic: str, source: dict, feedback: str = "") -> dict
         "Kurallar: 1) İlk sahne güçlü bir merak kancası olsun ama yanıltıcı olmasın. 2) SADECE aşağıdaki kaynak metindeki "
         "bilgileri kullan; kaynakta olmayan sayı/iddia ekleme. 3) Son sahne akılda kalan bir kapanış/yorum olsun, "
         "'takip et' gibi klişe istek yok. 4) Kalıp cümleleri tekrarlama; özgün yaz. "
-        "5b) Sayıları, yılları ve ölçüleri RAKAMLA yaz (ör. 1969, 21,5 saat, 384.000 km); yazıyla yazma.\n"
+        "5b) Sayıları, yılları ve ölçüleri RAKAMLA yaz (ör. 1969, 21,5 saat, 384.000 km); yazıyla yazma. "
+        "Konuşma dili gibi yaz: kısa cümleler, doğru yerlerde virgül. Vurgulanacak 1-2 kelimeyi sahne başına *yıldız* içine al "
+        "(ör. *asla*); fazlasını işaretleme.\n"
         "5) visual_query ve visual_prompt İNGİLİZCE olsun (stok video araması / yapay zekâ görsel promptu).\n"
         f"{('Önceki taslağın sorunları, düzelt: ' + feedback) if feedback else ''}\n\n"
         f"{llm.wrap_untrusted(source['title'] + ' – ' + source['url'], source['text'], 5000)}\n\n"
@@ -61,31 +64,28 @@ def write_script(ctx: Ctx, topic: str, source: dict, feedback: str = "") -> dict
     )
     s = llm.generate_json(prompt, task="short_script", required=("title", "scenes"), temperature=0.85)
     s["scenes"] = s["scenes"][:8]
-    s["script_text"] = " ".join(sc["text"] for sc in s["scenes"])
+    s["script_text"] = tts.strip_markup(" ".join(sc["text"] for sc in s["scenes"]))
     return s
 
 
 def render(ctx: Ctx, script: dict) -> tuple[str, list[dict], float]:
     cfg, wd = ctx.cfg, ctx.workdir
     used: set = set()
-    clips, licenses, total = [], [], 0.0
+    speeches = tts.speak_all(ctx.db, [sc["text"] for sc in script["scenes"]], wd, cfg, seed=ctx.item_id)
+    scenes, licenses = [], []
     for i, sc in enumerate(script["scenes"]):
-        audio, d = tts.synthesize(sc["text"], wd / f"a{i}", voice=cfg["voice"], rate=cfg["rate"])
         vis = images.get_visual(sc, wd, f"v{i}", vertical=True, seed=ctx.item_id * 31 + i, used=used)
         licenses.append({k: vis.get(k) for k in ("provider", "license", "credit_url", "synthetic", "attribution", "errors")})
-        dur = d + 0.2
-        chunks = video.split_chunks(sc["text"], 4)
-        caps = []
-        if not (config.mock() or config.skip_render()):
-            for j, (c, (s, e)) in enumerate(zip(chunks, video.chunk_times(chunks, dur))):
-                caps.append((video.caption_png(c, W, H, wd / f"c{i}_{j}.png", "short"), s, e))
-            clips.append(video.render_scene(vis, audio, caps, str(wd / f"s{i}.mp4"), W, H, dur, i))
-        total += dur
+        scenes.append({"speech": speeches[i], "visual": vis, "text": sc["text"], "title": None})
     out = str(wd / "final.mp4")
     if config.mock() or config.skip_render():
         pathlib.Path(out).write_bytes(b"MOCKVIDEO")
+        total = sum(s.duration + 0.65 for s in speeches)
     else:
-        video.concat_finish(clips, out, wd)
+        r = renderer.render_video(scenes, out, wd, W=W, H=H, kind="short", seed=ctx.item_id,
+                                log=lambda lvl, msg: ctx.db.log(lvl, msg))
+        total = r["duration"]
+        ctx.db.log("info", f"render modu: {r['mode']}, ses: {speeches[0].provider}")
     return out, licenses, total
 
 

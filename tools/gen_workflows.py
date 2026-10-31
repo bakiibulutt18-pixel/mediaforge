@@ -36,7 +36,8 @@ runs:
 """, encoding="utf-8")
 
 
-def workflow(fname, name, crons, cmd, *, render, timeout, group, label, artifact=False):
+def workflow(fname, name, crons, cmd, *, render, timeout, group, label, artifact=False,
+             art_paths="out/**/final.mp4\n            out/**/thumb_*.jpg"):
     if crons:
         on = "on:\n  schedule:\n" + "\n".join(f"    - cron: '{c}'" for c in crons) + "\n  workflow_dispatch:"
     else:
@@ -44,13 +45,12 @@ def workflow(fname, name, crons, cmd, *, render, timeout, group, label, artifact
     art = ""
     if artifact:
         art = f"""      - name: Önizleme çıktısı (yayın kapalıyken)
-        if: ${{{{ always() && (vars.FORGE_LIVE != '1' || inputs.dry_run == true) }}}}
+        if: ${{{{ always() && (vars.FORGE_LIVE != '1' || inputs.dry_run == true{" || true" if label == "demo" else ""}) }}}}
         uses: actions/upload-artifact@v4
         with:
           name: onizleme-{label}
           path: |
-            out/**/final.mp4
-            out/**/thumb_*.jpg
+            {art_paths}
           retention-days: 3
           if-no-files-found: ignore
 """
@@ -74,6 +74,7 @@ jobs:
       FORGE_LIVE: ${{{{ vars.FORGE_LIVE }}}}
       FORGE_DRY_RUN: ${{{{ inputs.dry_run == true && '1' || '' }}}}
       PYTHONUNBUFFERED: "1"
+      TTS_PROVIDERS: ${{{{ vars.TTS_PROVIDERS }}}}
 {env_block}
     steps:
       - uses: actions/checkout@v4
@@ -110,4 +111,7 @@ workflow("yt-doc.yml", "YouTube belgesel", ["0 5 * * 1,2,3"], "long yt_doc", ren
 workflow("analytics.yml", "Analitik", ["30 21 * * *"], "analytics all", render=False, timeout=20, group="analytics", label="analytics")
 workflow("strategy.yml", "Haftalık strateji", ["0 22 * * 0"], "strategy all", render=False, timeout=20, group="analytics", label="strategy")
 workflow("health.yml", "Sağlık kontrolü", [], "health", render=False, timeout=10, group="health", label="health")
+# Ses + görsel kalite örnekleri (elle): yayın yapmaz, sonuçlar Artifacts'ta
+workflow("demo.yml", "Kalite örnekleri", [], "demo-voice\n      - name: Örnek videolar\n        run: python -m forge demo-video",
+         render=True, timeout=30, group="demo", label="demo", artifact=True, art_paths="out/demo/*.mp3\n            out/demo/ornek_*.mp4")
 print("workflows:", sorted(f.name for f in wf.iterdir()))

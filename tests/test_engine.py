@@ -183,6 +183,38 @@ class TestControl(Base):
         self.assertEqual(tweets.plan("x_tech"), 0)
 
 
+class TestTTS(Base):
+    def test_normalize_expands_symbols(self):
+        n = tts.normalize("Oran %45 ve 12 km, 5 kg & fazlası")
+        self.assertIn("yüzde 45", n)
+        self.assertIn("12 kilometre", n)
+        self.assertIn("5 kilogram", n)
+        self.assertNotIn("&", n)
+
+    def test_split_phrases_marks_breaths_and_emphasis(self):
+        ph = tts.split_phrases("Ay'a gitti, ama *asla* geri dönmedi. Peki neden?")
+        texts = [p["text"] for p in ph]
+        self.assertIn("asla", texts)
+        self.assertTrue(any(p["emph"] for p in ph))
+        self.assertEqual(ph[-1]["end"], "?")
+        self.assertTrue(any(p["sentence_end"] for p in ph))
+        self.assertTrue(all("*" not in t for t in texts))
+
+    def test_prosody_pauses_and_intonation(self):
+        def mk(end, emph=False):
+            return {"text": "a b c", "emph": emph, "end": end, "first": False, "sentence_end": end in ".?!"}
+        comma, period, question = (tts.prosody(mk(e), 0, 1) for e in (",", ".", "?"))
+        self.assertGreater(period["pause"], comma["pause"])
+        self.assertGreater(question["pitch"], period["pitch"])  # soru yükselir, cümle sonu alçalır
+        self.assertGreater(tts.prosody(mk("", True), 0, 1)["vol"], 0)
+
+    def test_mock_session_gives_marks(self):
+        sp = tts.speak_all(None, ["Merhaba dünya, bu bir deneme. İkinci cümle!"], self.tmp, {}, seed=1)[0]
+        self.assertGreater(sp.duration, 1.0)
+        self.assertGreaterEqual(len(sp.marks), 2)
+        self.assertEqual(tts.strip_markup("a *b* c"), "a b c")
+
+
 class TestShort(Base):
     def test_end_to_end_and_daily_limit(self):
         self.assertTrue(short_video.run("ig_facts"))
@@ -200,7 +232,7 @@ class TestShort(Base):
         db.close()
 
     def test_failure_is_recorded_and_retried(self):
-        with mock.patch.object(tts, "synthesize", side_effect=RuntimeError("tts down")):
+        with mock.patch.object(tts, "speak_all", side_effect=RuntimeError("tts down")):
             self.assertFalse(short_video.run("ig_facts"))
         db = self.db("ig_facts")
         it = db.items(kind="short")[0]
@@ -215,7 +247,7 @@ class TestShort(Base):
         db.close()
 
     def test_gives_up_after_max_attempts(self):
-        with mock.patch.object(tts, "synthesize", side_effect=RuntimeError("down")):
+        with mock.patch.object(tts, "speak_all", side_effect=RuntimeError("down")):
             for _ in range(common.MAX_ATTEMPTS):
                 short_video.run("ig_facts")
         db = self.db("ig_facts")
