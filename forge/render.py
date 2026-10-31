@@ -16,7 +16,7 @@ from . import config, tts, video
 from .video import RenderError, _even, _pil, font, run, wrap
 
 FPS = 30
-HEAD, TAIL, T = 0.30, 0.35, 0.40
+HEAD, TAIL, T = 0.25, 0.30, 0.40
 ACCENT = (255, 214, 10)
 MAX_GROUP = 12
 
@@ -279,6 +279,9 @@ def _render_fancy(scenes, out, wd, *, W, H, kind, seed) -> dict:
     speech_starts = [st + HEAD for st in starts]
     audio = build_audio([s["speech"] for s in scenes], speech_starts, total, wd / "mix.wav")
     mux(vid, audio, out, total)
+    vd, fd = video.duration(vid), video.duration(out)
+    if abs(vd - total) > 0.6 or abs(fd - total) > 0.6:
+        raise RenderError(f"süre uyuşmazlığı: beklenen {total:.1f} sn, görüntü {vd:.1f} sn, çıktı {fd:.1f} sn")
     return {"path": out, "duration": total, "speech_starts": speech_starts, "mode": "fancy"}
 
 

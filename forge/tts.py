@@ -265,6 +265,48 @@ def hash_int(s: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Zaman işaretleri: sessizlik tespitiyle ifade sınırlarını bulma (Gemini zaman bilgisi vermez)
+# ---------------------------------------------------------------------------
+def silences(path, min_len: float = 0.12) -> list[tuple[float, float]]:
+    p = subprocess.run([video.ffmpeg_exe(), "-hide_banner", "-nostats", "-i", str(path), "-af",
+                        f"silencedetect=noise=-35dB:d={min_len}", "-f", "null", "-"],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    starts = [float(m) for m in re.findall(r"silence_start: (-?[\d.]+)", p.stderr)]
+    ends = [float(m) for m in re.findall(r"silence_end: ([\d.]+)", p.stderr)]
+    return list(zip(starts, ends))
+
+
+def align_marks(path, texts: list[str], dur: float) -> list[tuple[float, float, str]]:
+    """İfadeleri gerçek duraklamalara oturtur; bulunamayan sınır karakter oranına göre tahmin edilir."""
+    if len(texts) <= 1:
+        return [(0.0, dur, texts[0] if texts else "")]
+    try:
+        gaps = [g for g in silences(path) if 0.15 < (g[0] + g[1]) / 2 < dur - 0.15]
+    except Exception:
+        gaps = []
+    total = sum(len(t) for t in texts) or 1
+    bounds, used_until, acc = [], 0.0, 0
+    for t in texts[:-1]:
+        acc += len(t)
+        expected = dur * acc / total
+        tol = max(1.0, dur * 0.15)
+        cand = [g for g in gaps if g[0] >= used_until and abs((g[0] + g[1]) / 2 - expected) <= tol]
+        if cand:
+            g = min(cand, key=lambda g: abs((g[0] + g[1]) / 2 - expected))
+            bounds.append((g[0], g[1]))
+            used_until = g[1]
+        else:
+            b = max(expected, used_until)
+            bounds.append((b, b))
+            used_until = b
+    marks, start = [], 0.0
+    for t, (bs, be) in zip(texts, bounds + [(dur, dur)]):
+        marks.append((start, max(bs, start + 0.05), t))
+        start = be
+    return marks
+
+
+# ---------------------------------------------------------------------------
 # Gemini TTS
 # ---------------------------------------------------------------------------
 _tts_model_cache: str | None = None
@@ -307,9 +349,9 @@ def _gemini(text, out_base, cfg, seed) -> Speech:
     model = gemini_tts_model(key)
     voice = cfg.get("gemini_voice", "Charon")
     style = cfg.get("tts_style") or "Doğal, akıcı ve insani bir tonda oku."
-    prompt = (f"{style}\nNefes al: virgülde kısa, noktada tam bir duraklama yap. Vurgulanması gereken yerde sesi yükselt, "
-              f"cümle sonlarında doğal şekilde alçal. Robotik gibi değil, gerçek bir insan gibi konuş.\n\n"
-              f"### TRANSCRIPT\n{strip_markup(normalize(text))}")
+    clean = strip_markup(normalize(text))
+    prompt = (f"Say in natural Turkish, like a real human speaker ({style}) with a brief breath at commas, "
+              f"a full pause at periods, rising on questions and falling at sentence ends: {clean}")
     gap = float(config.env("GEMINI_TTS_INTERVAL", "7"))
     wait = _last_gemini_call + gap - time.time()
     if wait > 0:
@@ -344,7 +386,11 @@ def _gemini(text, out_base, cfg, seed) -> Speech:
     path = pathlib.Path(out_base).with_suffix(".wav")
     _to_trimmed_wav(raw, path)
     dur = len(_read_wav(path)) / SR
-    return Speech(str(path), dur, [], "gemini")
+    expected = len(clean.split()) / 2.4
+    if dur > expected * 1.8 + 3:  # talimatı sesli okumuş ya da aşırı yavaşlamış olabilir
+        raise TTSError(f"Gemini sesi beklenenden çok uzun ({dur:.1f} sn, beklenen ~{expected:.1f} sn)")
+    marks = align_marks(path, [p["text"] for p in split_phrases(text)], dur)
+    return Speech(str(path), dur, marks, "gemini")
 
 
 # ---------------------------------------------------------------------------

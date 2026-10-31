@@ -48,9 +48,9 @@ def health() -> int:
 
 
 SAMPLE_TEXTS = [
-    "1969 yılında, Ay'a ayak basan ilk insanlar *sadece* iki kişiydi. Peki ya sonrasında ne oldu? Bunu çok az kişi bilir.",
-    "Üstelik, o günün bilgisayarı bugünkü bir hesap makinesinden bile *daha zayıftı*! İnanması zor, değil mi?",
-    "Ve işte asıl şaşırtıcı kısım: Her şey, sadece birkaç satırlık bir kodla başladı.",
+    "1969'da Ay'a ayak basan ilk insanlar, *sadece* iki kişiydi. Peki sonrasında ne oldu?",
+    "Üstelik o günün bilgisayarı, bugünkü bir hesap makinesinden bile *daha zayıftı*!",
+    "Ve asıl şaşırtıcı kısım şu: Her şey, birkaç satırlık bir kodla başladı.",
 ]
 
 
@@ -88,6 +88,8 @@ def demo_video() -> int:
                ("code on screen", "Programmer typing code, cinematic")]
     cfg = dict(config.CHANNELS["yt_fun_shorts"])
     speeches = tts.speak_all(None, SAMPLE_TEXTS, out, cfg, seed=3)
+    for i, sp in enumerate(speeches):
+        print(f"ses {i}: {sp.provider} {sp.duration:.1f} sn, {len(sp.marks)} ifade, metin {len(SAMPLE_TEXTS[i].split())} kelime")
     for kind, (W, H), name in (("short", (1080, 1920), "ornek_dikey.mp4"), ("long", (1920, 1080), "ornek_yatay.mp4")):
         used: set = set()
         scenes = []

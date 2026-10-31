@@ -208,6 +208,14 @@ class TestTTS(Base):
         self.assertGreater(question["pitch"], period["pitch"])  # soru yükselir, cümle sonu alçalır
         self.assertGreater(tts.prosody(mk("", True), 0, 1)["vol"], 0)
 
+    def test_align_marks_snaps_to_pauses(self):
+        with mock.patch.object(tts, "silences", return_value=[(3.9, 4.3), (7.0, 7.4)]):
+            m = tts.align_marks("x.wav", ["aaaa aaaa", "bbbb bbbb", "cccc cccc"], 12.0)
+        self.assertEqual(len(m), 3)
+        self.assertAlmostEqual(m[0][1], 3.9)   # ilk ifade gerçek duraklamada biter
+        self.assertAlmostEqual(m[1][0], 4.3)   # ikincisi duraklamadan sonra başlar
+        self.assertAlmostEqual(m[2][1], 12.0)
+
     def test_mock_session_gives_marks(self):
         sp = tts.speak_all(None, ["Merhaba dünya, bu bir deneme. İkinci cümle!"], self.tmp, {}, seed=1)[0]
         self.assertGreater(sp.duration, 1.0)
