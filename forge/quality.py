@@ -13,7 +13,8 @@ BANNED_PHRASES = [
     "şok oldu", "inanamayacaksınız", "doktorlar bunu sakladı", "kesin kazanç", "garanti kazanç",
     "bu videoyu izlemeden", "asla yapmayın", "%100 garanti",
 ]
-POLICY_KEYWORDS = ["intihar", "kendine zarar", "silah yapımı", "bomba yapımı", "uyuşturucu üretimi", "nefret söylemi"]
+SPELLED_NUMBERS = re.compile(r"\b(yüz|bin|binlerce|milyon|milyonlarca|milyar|milyarlarca|trilyon)\b", re.I)
+POLICY_KEYWORDS =["intihar", "kendine zarar", "silah yapımı", "bomba yapımı", "uyuşturucu üretimi", "nefret söylemi"]
 
 
 def shingles(text: str, n: int = 5) -> set[str]:
@@ -86,6 +87,12 @@ def check_script(script_text: str, scenes: list[dict], previous_texts: list[str]
         r.info["unverified_numbers"] = unmatched[:20]
         if unmatched:
             r.penalize(min(5 * len(unmatched), 30), f"{len(unmatched)} sayı kaynak metinde bulunamadı: {unmatched[:5]}")
+
+    # Yazıyla yazılmış büyük sayılar sayı doğrulamasından kaçar; rakamla yazılması istenir.
+    spelled = SPELLED_NUMBERS.findall(script_text)
+    if spelled:
+        r.info["spelled_numbers"] = spelled[:10]
+        r.penalize(min(3 * len(spelled), 12), f"yazıyla yazılmış sayılar doğrulanamaz ({', '.join(spelled[:4])}); rakamla yazılmalı")
 
     if require_sources:
         cited = 0

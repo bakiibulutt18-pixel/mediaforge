@@ -130,7 +130,8 @@ def build_script(ctx: Ctx, topic: str, cand: dict, claims: list[dict], feedback:
         data = llm.generate_json(
             f"Persona: {cfg['persona']}\nVideo konusu: {topic}\nBölüm {si + 1}/{len(outline['sections'])}: {sec['heading']} — {sec['goal']}\n"
             f"Hedef: ~{per_section} kelime Türkçe anlatım; her sahne 1-2 cümle (8-25 kelime). Önceki bölümün son cümlesi: {prev or '—'}\n"
-            "Yalnızca aşağıdaki iddialardaki bilgi ve sayıları kullan; sayı uydurma. Doğal, özgün, kalıp cümlesiz yaz; "
+            "Yalnızca aşağıdaki iddialardaki bilgi ve sayıları kullan; sayı uydurma. Sayıları, yılları ve ölçüleri RAKAMLA yaz "
+            "(ör. 1969, 24.000 konteyner); yazıyla yazma. Doğal, özgün, kalıp cümlesiz yaz; "
             f"{'bu bir belgesel: ciddi ve akıcı ton.' if cfg.get('research') == 'deep' else 'esprili ve enerjik ton, ama bilgi doğru kalsın.'}\n"
             "visual_type: stock (stok video/foto), ai (yapay zekâ illüstrasyon) veya chart (YALNIZCA iddialardaki sayılarla "
             "karşılaştırma grafiği; chart alanını doldur). visual_query/visual_prompt İNGİLİZCE.\n"
@@ -176,7 +177,7 @@ def render(ctx: Ctx, script: dict) -> dict:
                    "license": "özgün grafik", "credit_url": "", "synthetic": False}
         else:
             vis = images.get_visual(sc, wd, f"v{i}", vertical=False, seed=ctx.item_id * 17 + i, used=used)
-        licenses.append({k: vis[k] for k in ("provider", "license", "credit_url", "synthetic")})
+        licenses.append({k: vis.get(k) for k in ("provider", "license", "credit_url", "synthetic", "attribution", "errors")})
         chunks = video.split_chunks(sc["text"], 14)
         times = video.chunk_times(chunks, dur)
         for c, (s, e) in zip(chunks, times):
@@ -202,15 +203,17 @@ def fmt_ts(sec: float) -> str:
     return f"{sec // 60}:{sec % 60:02d}" if sec < 3600 else f"{sec // 3600}:{sec // 60 % 60:02d}:{sec % 60:02d}"
 
 
-def build_description(meta: dict, chapters, sources: list[dict], deep: bool) -> str:
+def build_description(meta: dict, chapters, sources: list[dict], deep: bool, credits: str = "") -> str:
     parts = [meta["description"].replace("<", "").replace(">", "").strip()]
     if len(chapters) >= 3:
         ch = [(0.0, chapters[0][1])] + [(s, h) for s, h in chapters[1:]]
         parts.append("Bölümler:\n" + "\n".join(f"{fmt_ts(s)} {h}" for s, h in ch))
     if deep and sources:
         parts.append("Kaynaklar:\n" + "\n".join(f"- {s['title'][:80]} {s['url']}" for s in sources[:10]))
+    if credits:
+        parts.append(credits)
     parts.append(common.AI_DISCLOSURE)
-    tags = " ".join("#" + t.replace(" ", "") for t in meta.get("tags", [])[:3])
+    tags =" ".join("#" + t.replace(" ", "") for t in meta.get("tags", [])[:3])
     if tags:
         parts.append(tags)
     return "\n\n".join(parts)[:4900]
@@ -311,7 +314,11 @@ def run(channel: str) -> bool:
             if not common.qc_gate(ctx, report):
                 raise RuntimeError(f"Medya kontrolü başarısız: {mi}")
         thumb = thumbnails(ctx, meta)
-        desc = build_description(meta, r["chapters"], sources, cfg.get("research") == "deep")
+        fb = images.fallback_report(r["licenses"])
+        if fb:
+            db.log("warn", fb)
+        desc = build_description(meta, r["chapters"], sources, cfg.get("research") == "deep",
+                                 images.attributions(r["licenses"], 10))
         synthetic = any(l.get("synthetic") for l in r["licenses"])
         db.update_item(ctx.item_id, payload_update={"meta": meta, "licenses": r["licenses"], "video_path": r["path"],
                                                     "duration": r["duration"], "description": desc})

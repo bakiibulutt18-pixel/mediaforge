@@ -5,6 +5,8 @@ Her görsel için lisans/kaynak bilgisi döndürülür; pipeline bunu kayıt alt
 from __future__ import annotations
 
 import pathlib
+import re
+import time
 import urllib.parse
 
 from . import config, video
@@ -62,9 +64,51 @@ def _pollinations(prompt, dest_base, vertical, seed):
     W, H = (1080, 1920) if vertical else (1920, 1080)
     url = ("https://image.pollinations.ai/prompt/" + urllib.parse.quote(prompt[:600]) +
            f"?width={W}&height={H}&seed={seed}&nologo=true&model=flux")
-    path = _download(url, dest_base.with_suffix(".jpg"), 15_000)
-    return {"path": str(path), "type": "image", "provider": "pollinations", "license": "Yapay zekâ üretimi (Pollinations)",
-            "credit_url": "https://pollinations.ai", "synthetic": True}
+    last = None
+    for attempt in range(3):  # ücretsiz servis yoğun: kısa beklemelerle birkaç kez dene
+        try:
+            path = _download(url + f"&retry={attempt}", dest_base.with_suffix(".jpg"), 15_000)
+            return {"path": str(path), "type": "image", "provider": "pollinations",
+                    "license": "Yapay zekâ üretimi (Pollinations)", "credit_url": "https://pollinations.ai", "synthetic": True}
+        except HttpError as e:
+            last = e
+            time.sleep(4 * (attempt + 1))
+    raise last
+
+
+# Ticari kullanıma ve işlenmeye uygun Commons lisansları (NC ve ND hariç)
+_OK_LICENSE = re.compile(r"^(public domain|pd\b|cc0|cc[- ]by(?![- ]?nc)(?![- ]?nd)|cc[- ]by-sa(?![- ]?nc)(?![- ]?nd)|attribution)", re.I)
+
+
+def _plain(html_text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", html_text or "")).strip()
+
+
+def _commons(query, dest_base, vertical, used):
+    """Wikimedia Commons: lisansı belli gerçek fotoğraflar (ör. NASA, tarihî görseller)."""
+    W = 1080 if vertical else 1920
+    r = request("GET", "https://commons.wikimedia.org/w/api.php", params={
+        "action": "query", "format": "json", "generator": "search", "gsrnamespace": 6, "gsrlimit": 12,
+        "gsrsearch": f"{query} filetype:bitmap", "prop": "imageinfo", "iiprop": "url|size|mime|extmetadata",
+        "iiurlwidth": W}).json()
+    pages = sorted((r.get("query", {}).get("pages") or {}).values(), key=lambda p: p.get("index", 0))
+    for p in pages:
+        info = (p.get("imageinfo") or [{}])[0]
+        meta = info.get("extmetadata", {})
+        lic = _plain(meta.get("LicenseShortName", {}).get("value", ""))
+        if info.get("mime") not in ("image/jpeg", "image/png") or (info.get("width") or 0) < 900:
+            continue
+        if not _OK_LICENSE.match(lic) or info.get("descriptionurl") in used:
+            continue
+        src = info.get("thumburl") or info.get("url")
+        path = _download(src, dest_base.with_suffix(".jpg" if info["mime"] == "image/jpeg" else ".png"))
+        used.add(info.get("descriptionurl"))
+        artist = _plain(meta.get("Artist", {}).get("value", ""))[:60] or "Wikimedia Commons"
+        needs_credit = not lic.lower().startswith(("public domain", "pd", "cc0"))
+        return {"path": str(path), "type": "image", "provider": "commons", "license": f"{lic} (Wikimedia Commons)",
+                "credit_url": info.get("descriptionurl", ""), "synthetic": False,
+                "attribution": f"{artist}, {lic}, {info.get('descriptionurl', '')}" if needs_credit else ""}
+    return None
 
 
 def get_visual(scene: dict, dest_dir, name: str, *, vertical: bool, seed: int, used: set) -> dict:
@@ -81,7 +125,11 @@ def get_visual(scene: dict, dest_dir, name: str, *, vertical: bool, seed: int, u
 
     query = scene.get("visual_query") or scene.get("visual_prompt") or "abstract background"
     prompt = scene.get("visual_prompt") or query
-    order = ["pexels_video", "pexels_photo", "ai"] if scene.get("visual_type", "stock") == "stock" else ["ai", "pexels_photo"]
+    if scene.get("visual_type", "stock") == "stock":
+        order = ["pexels_video", "pexels_photo", "commons", "ai"]
+    else:
+        order = ["ai", "commons", "pexels_photo"]
+    errors = []
     for step in order:
         try:
             res = None
@@ -89,12 +137,33 @@ def get_visual(scene: dict, dest_dir, name: str, *, vertical: bool, seed: int, u
                 res = _pexels_video(query, base, vertical, used)
             elif step == "pexels_photo":
                 res = _pexels_photo(query, base, vertical, used)
+            elif step == "commons":
+                res = _commons(query, base, vertical, used)
             elif step == "ai":
                 res = _pollinations(prompt + ", cinematic, high detail, no text, no watermark", base, vertical, seed)
             if res:
                 return res
-        except HttpError:
-            continue
+        except HttpError as e:
+            errors.append(f"{step}: {str(e)[:120]}")
     path = video.gradient_png(base.with_suffix(".png"), W, H, seed)
     return {"path": path, "type": "image", "provider": "gradient", "license": "özgün (otomatik üretim)",
-            "credit_url": "", "synthetic": False}
+            "credit_url": "", "synthetic": False, "errors": errors}
+
+
+def attributions(licenses: list[dict], limit: int = 6) -> str:
+    """CC BY / CC BY-SA görselleri için açıklamaya eklenecek atıf satırı."""
+    seen, out = set(), []
+    for l in licenses:
+        a = l.get("attribution")
+        if a and a not in seen:
+            seen.add(a)
+            out.append(a)
+    return ("Görseller: " + " | ".join(out[:limit])) if out else ""
+
+
+def fallback_report(licenses: list[dict]) -> str | None:
+    fb = [l for l in licenses if l.get("provider") == "gradient"]
+    if not fb:
+        return None
+    first = next((e for l in fb for e in l.get("errors", [])), "bilinmiyor")
+    return f"{len(fb)}/{len(licenses)} sahne düz renkli yedek karta düştü (ilk sebep: {first})"

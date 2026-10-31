@@ -51,7 +51,8 @@ def write_script(ctx: Ctx, topic: str, source: dict, feedback: str = "") -> dict
         f"Hedef: yaklaşık {words} kelime ({lo}-{hi} sn). 5-7 sahne; her sahne 1-2 kısa cümle.\n"
         "Kurallar: 1) İlk sahne güçlü bir merak kancası olsun ama yanıltıcı olmasın. 2) SADECE aşağıdaki kaynak metindeki "
         "bilgileri kullan; kaynakta olmayan sayı/iddia ekleme. 3) Son sahne akılda kalan bir kapanış/yorum olsun, "
-        "'takip et' gibi klişe istek yok. 4) Kalıp cümleleri tekrarlama; özgün yaz.\n"
+        "'takip et' gibi klişe istek yok. 4) Kalıp cümleleri tekrarlama; özgün yaz. "
+        "5b) Sayıları, yılları ve ölçüleri RAKAMLA yaz (ör. 1969, 21,5 saat, 384.000 km); yazıyla yazma.\n"
         "5) visual_query ve visual_prompt İNGİLİZCE olsun (stok video araması / yapay zekâ görsel promptu).\n"
         f"{('Önceki taslağın sorunları, düzelt: ' + feedback) if feedback else ''}\n\n"
         f"{llm.wrap_untrusted(source['title'] + ' – ' + source['url'], source['text'], 5000)}\n\n"
@@ -71,7 +72,7 @@ def render(ctx: Ctx, script: dict) -> tuple[str, list[dict], float]:
     for i, sc in enumerate(script["scenes"]):
         audio, d = tts.synthesize(sc["text"], wd / f"a{i}", voice=cfg["voice"], rate=cfg["rate"])
         vis = images.get_visual(sc, wd, f"v{i}", vertical=True, seed=ctx.item_id * 31 + i, used=used)
-        licenses.append({k: vis[k] for k in ("provider", "license", "credit_url", "synthetic")})
+        licenses.append({k: vis.get(k) for k in ("provider", "license", "credit_url", "synthetic", "attribution", "errors")})
         dur = d + 0.2
         chunks = video.split_chunks(sc["text"], 4)
         caps = []
@@ -92,10 +93,13 @@ def publish(ctx: Ctx, script: dict, path: str, licenses: list[dict]) -> dict:
     cfg = ctx.cfg
     tags = " ".join((script.get("hashtags") or [])[:5] + cfg.get("hashtags", [])[:3])
     synthetic = any(l.get("synthetic") for l in licenses)
+    credits = images.attributions(licenses)
     if cfg["platform"] == "instagram":
         caption = f"{script['title']}\n\n{script.get('caption', '')}\n\n{tags}\n\n🤖 Yapay zekâ destekli içerik."
-        return instagram.publish_reel(path, caption)
-    desc = f"{script.get('caption', '')}\n\n{tags}\n\n{common.AI_DISCLOSURE}"
+        if credits:
+            caption += f"\n\n{credits}"
+        return instagram.publish_reel(path, caption[:2150])
+    desc = f"{script.get('caption', '')}\n\n{tags}\n\n{common.AI_DISCLOSURE}" + (f"\n\n{credits}" if credits else "")
     vid = youtube.upload_video(ctx.db, cfg["cred"], path, title=f"{script['title']} #shorts"[:100], description=desc,
                                tags=["shorts"] + [h.strip("#") for h in script.get("hashtags", [])][:8],
                                category_id=cfg.get("category_id", "24"), publish_at_ts=None, synthetic=synthetic)
@@ -150,6 +154,9 @@ def run(channel: str) -> bool:
             raise RuntimeError(f"Senaryo kalite eşiğini geçemedi: {report.critical + report.issues}")
 
         path, licenses, total = render(ctx, script)
+        fb = images.fallback_report(licenses)
+        if fb:
+            db.log("warn", fb)
         if not (config.mock() or config.skip_render()):
             lo, hi = cfg["duration"]
             mi = video.verify_video(path, W=W, H=H, min_s=lo * 0.6, max_s=min(hi * 1.5, 59 if cfg["platform"] == "youtube" else 90))

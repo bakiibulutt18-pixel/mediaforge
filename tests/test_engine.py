@@ -54,6 +54,14 @@ class TestQuality(unittest.TestCase):
                                   source_text="kaynakta 24.000 konteyner yazıyor")
         self.assertEqual(ok.score, 100)
 
+    def test_spelled_numbers_flagged(self):
+        t = "Ay'da yüz binlerce kilometre uzakta bir yer"
+        r = quality.check_script(t, [{"text": t, "visual_query": "x"}], [], source_text="kaynak")
+        self.assertLess(r.score, 100)
+        self.assertTrue(r.info["spelled_numbers"])
+        ok = quality.check_script("Bir yüzyıl önce", [{"text": "Bir yüzyıl önce", "visual_query": "x"}], [], source_text="kaynak")
+        self.assertEqual(ok.score, 100)  # 'yüzyıl' yanlış alarm vermemeli
+
     def test_high_overlap_is_critical(self):
         t = " ".join(f"kelime{i}" for i in range(40))
         r = quality.check_script(t, [{"text": t, "visual_query": "x"}], [t])
@@ -93,6 +101,42 @@ class TestGeminiModel(unittest.TestCase):
             self.assertEqual(llm._gemini("selam", None, False, 0.5, 100), "merhaba")
             self.assertTrue(any("gemini-3.8-flash:" in c for c in calls))
             self.assertFalse(any("lite" in c or "image" in c for c in calls if c.endswith(":generateContent")))
+
+
+class TestCommons(Base):
+    def test_commons_filters_licenses_and_returns_attribution(self):
+        from forge import images
+        from forge.net import Response
+
+        def meta(lic, artist="Biri"):
+            return {"LicenseShortName": {"value": lic}, "Artist": {"value": f"<a href='x'>{artist}</a>"}}
+
+        pages = {"1": {"index": 1, "imageinfo": [{"mime": "image/jpeg", "width": 3000, "extmetadata": meta("CC BY-NC 4.0"),
+                                                  "descriptionurl": "https://c/1", "thumburl": "https://t/1.jpg"}]},
+                 "2": {"index": 2, "imageinfo": [{"mime": "image/jpeg", "width": 3000, "extmetadata": meta("CC BY-SA 4.0", "Ayşe"),
+                                                  "descriptionurl": "https://c/2", "thumburl": "https://t/2.jpg"}]},
+                 "3": {"index": 3, "imageinfo": [{"mime": "image/jpeg", "width": 3000, "extmetadata": meta("Public domain"),
+                                                  "descriptionurl": "https://c/3", "thumburl": "https://t/3.jpg"}]}}
+
+        def fake(method, url, **kw):
+            if "commons.wikimedia.org" in url:
+                return Response(200, json.dumps({"query": {"pages": pages}}).encode(), {}, url)
+            return Response(200, b"x" * 20000, {}, url)
+
+        with mock.patch.object(images, "request", fake):
+            res = images._commons("apollo", self.tmp / "v0", False, set())
+        self.assertEqual(res["credit_url"], "https://c/2")  # NC elendi, ilk uygun lisans seçildi
+        self.assertIn("Ayşe", res["attribution"])
+        self.assertIn("CC BY-SA", res["attribution"])
+        self.assertIn("Görseller:", images.attributions([res]))
+        self.assertEqual(images.attributions([{"attribution": ""}]), "")
+
+    def test_fallback_report(self):
+        from forge import images
+        self.assertIsNone(images.fallback_report([{"provider": "pexels"}]))
+        rep = images.fallback_report([{"provider": "gradient", "errors": ["ai: HTTP 429"]}, {"provider": "commons"}])
+        self.assertIn("1/2", rep)
+        self.assertIn("429", rep)
 
 
 class TestX(unittest.TestCase):
