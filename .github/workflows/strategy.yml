@@ -1,0 +1,52 @@
+name: Haftalık strateji
+on:
+  schedule:
+    - cron: '0 22 * * 0'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Üret ama yayınlama"
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: forge-analytics
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FORGE_LIVE: ${{ vars.FORGE_LIVE }}
+      FORGE_DRY_RUN: ${{ inputs.dry_run == true && '1' || '' }}
+      PYTHONUNBUFFERED: "1"
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      YT_FUN_CLIENT_ID: ${{ secrets.YT_FUN_CLIENT_ID }}
+      YT_FUN_CLIENT_SECRET: ${{ secrets.YT_FUN_CLIENT_SECRET }}
+      YT_FUN_REFRESH_TOKEN: ${{ secrets.YT_FUN_REFRESH_TOKEN }}
+      YT_DOC_CLIENT_ID: ${{ secrets.YT_DOC_CLIENT_ID }}
+      YT_DOC_CLIENT_SECRET: ${{ secrets.YT_DOC_CLIENT_SECRET }}
+      YT_DOC_REFRESH_TOKEN: ${{ secrets.YT_DOC_REFRESH_TOKEN }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      IG_USER_ID: ${{ secrets.IG_USER_ID }}
+      X_API_KEY: ${{ secrets.X_API_KEY }}
+      X_API_SECRET: ${{ secrets.X_API_SECRET }}
+      X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+      X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          render: "false"
+      - name: Çalıştır
+        run: python -m forge strategy all
+      - name: Paneli güncelle
+        if: always()
+        run: python -m forge dashboard
+      - name: Durumu kaydet
+        if: always()
+        run: bash tools/commit_state.sh "strategy"
