@@ -56,6 +56,8 @@ def write_script(ctx: Ctx, topic: str, source: dict, feedback: str = "") -> dict
         "5b) Sayıları, yılları ve ölçüleri RAKAMLA yaz (ör. 1969, 21,5 saat, 384.000 km); yazıyla yazma. "
         "Konuşma dili gibi yaz: kısa cümleler, doğru yerlerde virgül. Vurgulanacak 1-2 kelimeyi sahne başına *yıldız* içine al "
         "(ör. *asla*); fazlasını işaretleme.\n"
+        "5c) İzlenme için: ilk cümle 2 saniyede merak/şaşkınlık uyandırsın (soru ya da çarpıcı rakam); son sahne ilk cümleye geri "
+        "bağlansın ki video döngüde tekrar izlensin; 'caption' alanının son satırı yoruma davet eden kısa bir soru olsun.\n"
         "5) visual_query ve visual_prompt İNGİLİZCE olsun (stok video araması / yapay zekâ görsel promptu).\n"
         f"{('Önceki taslağın sorunları, düzelt: ' + feedback) if feedback else ''}\n\n"
         f"{llm.wrap_untrusted(source['title'] + ' – ' + source['url'], source['text'], 5000)}\n\n"

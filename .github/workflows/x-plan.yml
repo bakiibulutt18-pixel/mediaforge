@@ -1,7 +1,5 @@
 name: X günlük plan
 on:
-  schedule:
-    - cron: '30 3 * * *'
   workflow_dispatch:
     inputs:
       dry_run:

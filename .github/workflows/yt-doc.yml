@@ -1,7 +1,5 @@
 name: YouTube belgesel
 on:
-  schedule:
-    - cron: '0 5 * * 1,2,3'
   workflow_dispatch:
     inputs:
       dry_run:

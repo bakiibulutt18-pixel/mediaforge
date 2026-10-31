@@ -96,16 +96,17 @@ jobs:
 # 1) Instagram: günde 5 Reels (TR 09:30, 12:30, 15:30, 19:00, 21:30)
 workflow("ig-reels.yml", "Instagram Reels", ["30 6 * * *", "30 9 * * *", "30 12 * * *", "0 16 * * *", "30 18 * * *"],
          "short ig_facts", render=True, timeout=30, group="ig_facts", label="ig_facts", artifact=True)
+# ŞU AN SADECE INSTAGRAM ÇALIŞIYOR: diğer kanalların zamanlaması kapalı (elle başlatılabilir). Açmak için cron ekle.
 # 2) X: günlük plan + 30 dakikada bir yayın (TR 07:00-24:00)
-workflow("x-plan.yml", "X günlük plan", ["30 3 * * *"], "tweets-plan x_tech", render=False, timeout=15, group="x_tech", label="x_plan")
-workflow("x-post.yml", "X gönderi yayını", ["5,35 4-20 * * *"], "tweets-post x_tech", render=False, timeout=8, group="x_tech", label="x_post")
+workflow("x-plan.yml", "X günlük plan", [], "tweets-plan x_tech", render=False, timeout=15, group="x_tech", label="x_plan")
+workflow("x-post.yml", "X gönderi yayını", [], "tweets-post x_tech", render=False, timeout=8, group="x_tech", label="x_post")
 # 3) YouTube eğlence: günlük uzun video + günde 4 Shorts
-workflow("yt-fun-long.yml", "YouTube eğlence - uzun video", ["0 5 * * *"], "long yt_fun", render=True, timeout=150,
+workflow("yt-fun-long.yml", "YouTube eğlence - uzun video", [], "long yt_fun", render=True, timeout=150,
          group="yt_fun", label="yt_fun", artifact=True)
-workflow("yt-fun-shorts.yml", "YouTube eğlence - Shorts", ["0 7 * * *", "0 10 * * *", "0 14 * * *", "30 17 * * *"],
+workflow("yt-fun-shorts.yml", "YouTube eğlence - Shorts", [],
          "short yt_fun_shorts", render=True, timeout=30, group="yt_fun_shorts", label="yt_fun_shorts", artifact=True)
 # 4) YouTube belgesel: haftada 2 video (Pzt/Sal/Çar üretim denemesi; haftalık hedef 2'de durur)
-workflow("yt-doc.yml", "YouTube belgesel", ["0 5 * * 1,2,3"], "long yt_doc", render=True, timeout=200,
+workflow("yt-doc.yml", "YouTube belgesel", [], "long yt_doc", render=True, timeout=200,
          group="yt_doc", label="yt_doc", artifact=True)
 # Analitik (günlük), strateji (haftalık), sağlık kontrolü (elle)
 workflow("analytics.yml", "Analitik", ["30 21 * * *"], "analytics all", render=False, timeout=20, group="analytics", label="analytics")

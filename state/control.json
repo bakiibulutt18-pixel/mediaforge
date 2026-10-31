@@ -2,9 +2,9 @@
   "paused": false,
   "channels": {
     "ig_facts": {"enabled": true, "budget_usd": 0},
-    "x_tech": {"enabled": true, "budget_usd": 0},
-    "yt_fun": {"enabled": true, "budget_usd": 0},
-    "yt_fun_shorts": {"enabled": true, "budget_usd": 0},
-    "yt_doc": {"enabled": true, "budget_usd": 0}
+    "x_tech": {"enabled": false, "budget_usd": 0},
+    "yt_fun": {"enabled": false, "budget_usd": 0},
+    "yt_fun_shorts": {"enabled": false, "budget_usd": 0},
+    "yt_doc": {"enabled": false, "budget_usd": 0}
   }
 }

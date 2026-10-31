@@ -1,10 +1,5 @@
 name: YouTube eğlence - Shorts
 on:
-  schedule:
-    - cron: '0 7 * * *'
-    - cron: '0 10 * * *'
-    - cron: '0 14 * * *'
-    - cron: '30 17 * * *'
   workflow_dispatch:
     inputs:
       dry_run:

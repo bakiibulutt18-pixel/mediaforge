@@ -1,7 +1,5 @@
 name: X gönderi yayını
 on:
-  schedule:
-    - cron: '5,35 4-20 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
