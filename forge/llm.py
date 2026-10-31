@@ -35,19 +35,65 @@ def wrap_untrusted(label: str, text: str, limit: int = 6000) -> str:
 
 
 # -- sağlayıcılar --------------------------------------------------------
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+_gemini_model_cache: str | None = None
+_EXCLUDE = ("lite", "image", "tts", "live", "audio", "embedding", "robotics", "computer", "preview", "exp")
+
+
+def _discover_gemini_model(key: str) -> str | None:
+    """Model adları sık değişir: ListModels'ten generateContent destekleyen en yeni 'flash' modelini seçer."""
+    try:
+        r = request("GET", "https://generativelanguage.googleapis.com/v1beta/models", params={"pageSize": 200},
+                    headers={"x-goog-api-key": key}, retries=1).json()
+    except HttpError:
+        return None
+    best, best_v = None, -1.0
+    for m in r.get("models", []):
+        name = m.get("name", "").removeprefix("models/")
+        if "generateContent" not in m.get("supportedGenerationMethods", []) or "flash" not in name:
+            continue
+        if any(x in name for x in _EXCLUDE):
+            continue
+        mv = re.match(r"gemini-(\d+(?:\.\d+)?)-flash", name)
+        v = float(mv.group(1)) if mv else 0.0
+        if v > best_v:
+            best, best_v = name, v
+    return best
+
+
+def gemini_model(key: str | None = None, rediscover: bool = False) -> str:
+    global _gemini_model_cache
+    explicit = config.env("GEMINI_MODEL")
+    if explicit:
+        return explicit
+    if rediscover and key:
+        found = _discover_gemini_model(key)
+        if found:
+            _gemini_model_cache = found
+    return _gemini_model_cache or DEFAULT_GEMINI_MODEL
+
+
 def _gemini(prompt, system, json_mode, temperature, max_tokens):
     key = config.env("GEMINI_API_KEY")
     if not key:
         raise LLMError("GEMINI_API_KEY yok")
-    model = config.env("GEMINI_MODEL", "gemini-2.5-flash")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     gen = {"temperature": temperature, "maxOutputTokens": max_tokens}
     if json_mode:
         gen["responseMimeType"] = "application/json"
     body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}], "generationConfig": gen}
     if system:
         body["systemInstruction"] = {"parts": [{"text": system}]}
-    r = request("POST", url, json_body=body, headers={"x-goog-api-key": key}, timeout=120).json()
+
+    def call(model):
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        return request("POST", url, json_body=body, headers={"x-goog-api-key": key}, timeout=120).json()
+
+    try:
+        r = call(gemini_model(key))
+    except HttpError as e:
+        if e.status not in (400, 404) or config.env("GEMINI_MODEL"):
+            raise
+        r = call(gemini_model(key, rediscover=True))  # model kaldırılmış olabilir → en yenisini bul
     try:
         parts = r["candidates"][0]["content"]["parts"]
     except (KeyError, IndexError):
@@ -59,7 +105,7 @@ def _groq(prompt, system, json_mode, temperature, max_tokens):
     key = config.env("GROQ_API_KEY")
     if not key:
         raise LLMError("GROQ_API_KEY yok")
-    model = config.env("GROQ_MODEL", "llama-3.3-70b-versatile")
+    model = config.env("GROQ_MODEL", "llama-3.3-70b-versatile")  # kaldırılırsa GROQ_MODEL ile değiştir
     msgs = []
     if system:
         msgs.append({"role": "system", "content": system})

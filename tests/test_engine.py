@@ -65,6 +65,36 @@ class TestQuality(unittest.TestCase):
         self.assertTrue(r.critical)
 
 
+class TestGeminiModel(unittest.TestCase):
+    def test_rediscovers_model_after_404(self):
+        from forge import llm
+        from forge.net import HttpError, Response
+        calls = []
+
+        def fake_request(method, url, **kw):
+            calls.append(url)
+            if url.endswith("/v1beta/models"):
+                body = {"models": [
+                    {"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"]},
+                    {"name": "models/gemini-3.8-flash-lite", "supportedGenerationMethods": ["generateContent"]},
+                    {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+                    {"name": "models/gemini-3.9-flash-image", "supportedGenerationMethods": ["generateContent"]},
+                    {"name": "models/text-embedding", "supportedGenerationMethods": ["embedContent"]}]}
+                return Response(200, json.dumps(body).encode(), {}, url)
+            if "gemini-2.5-flash:" in url:
+                raise HttpError(404, "no longer available", url)
+            ok = {"candidates": [{"content": {"parts": [{"text": "merhaba"}]}}]}
+            return Response(200, json.dumps(ok).encode(), {}, url)
+
+        env = {"GEMINI_API_KEY": "k", "FORGE_MOCK": ""}
+        with mock.patch.dict(os.environ, env), mock.patch.object(llm, "request", fake_request), \
+             mock.patch.object(llm, "DEFAULT_GEMINI_MODEL", "gemini-2.5-flash"), mock.patch.object(llm, "_gemini_model_cache", None):
+            os.environ.pop("GEMINI_MODEL", None)
+            self.assertEqual(llm._gemini("selam", None, False, 0.5, 100), "merhaba")
+            self.assertTrue(any("gemini-3.8-flash:" in c for c in calls))
+            self.assertFalse(any("lite" in c or "image" in c for c in calls if c.endswith(":generateContent")))
+
+
 class TestX(unittest.TestCase):
     def test_weighted_len(self):
         self.assertEqual(x.weighted_len("a" * 10), 10)

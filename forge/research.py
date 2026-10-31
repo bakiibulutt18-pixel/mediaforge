@@ -88,15 +88,21 @@ def grounded_sources(query: str, max_sources: int = 8) -> list[dict]:
     key = config.env("GEMINI_API_KEY")
     if not key:
         return []
-    model = config.env("GEMINI_MODEL", "gemini-2.5-flash")
     body = {
         "contents": [{"role": "user", "parts": [{"text": f"Şu konuda güvenilir, güncel kaynaklardan sayısal verili özet çıkar: {query}"}]}],
         "tools": [{"google_search": {}}],
     }
-    try:
-        r = request("POST", f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                    json_body=body, headers={"x-goog-api-key": key}, timeout=120).json()
-    except HttpError:
+    r = None
+    for rediscover in (False, True):
+        try:
+            model = llm.gemini_model(key, rediscover=rediscover)
+            r = request("POST", f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                        json_body=body, headers={"x-goog-api-key": key}, timeout=120).json()
+            break
+        except HttpError as e:
+            if e.status not in (400, 404) or config.env("GEMINI_MODEL"):
+                return []
+    if r is None:
         return []
     chunks = (r.get("candidates") or [{}])[0].get("groundingMetadata", {}).get("groundingChunks", [])
     out, seen = [], set()
